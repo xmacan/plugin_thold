@@ -1,6 +1,7 @@
 ## ChangeLog
 
 --- develop ---
+* feature#21 plugin_maint: Add Log that notifcation was supress due to maint schedule 
 
 * feature#497: Show acknowledgment status on Thresholds tab instead of log
 

@@ -498,16 +498,15 @@ function thold_update_host_status() {
 		foreach ($failed as $fh) {
 			$alert_email = read_config_option('alert_email');
 
-			if (api_plugin_is_enabled('maint')) {
-				if (plugin_maint_check_cacti_host($fh['host_id'])) {
-					continue;
-				}
-			}
-
 			$host = db_fetch_row_prepared('SELECT *
 				FROM host
 				WHERE id = ?',
 				array($fh['host_id']));
+
+			if (api_plugin_is_enabled('maint') && plugin_maint_check_cacti_host($fh['host_id'])) {
+					cacti_log('WARNING: Device[' . $fh['host_id'] . '] Hostname[' . $host['hostname'] . '] returned from DOWN state. Only logging because maint device', true, 'THOLD');
+					continue;
+			}
 
 			if (!sizeof($host)) {
 				db_execute_prepared('DELETE
@@ -734,126 +733,125 @@ function thold_update_host_status() {
 		foreach ($hosts as $host) {
 			$alert_email = read_config_option('alert_email');
 
-			if (api_plugin_is_enabled('maint')) {
-				if (plugin_maint_check_cacti_host($host['id'])) {
-					continue;
+			if (api_plugin_is_enabled('maint') && plugin_maint_check_cacti_host($host['id']) ) {
+				cacti_log('WARNING: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] is DOWN. Only logging because maint device', true, 'THOLD');
+			} else {
+
+				$downtimemsg = get_timeinstate($host);
+
+				$subject = read_config_option('thold_down_subject');
+				if ($subject == '') {
+					$subject = __('Devices Error: <DESCRIPTION> (<HOSTNAME>) is DOWN', 'thold');
 				}
-			}
 
-			$downtimemsg = get_timeinstate($host);
+				$subject = str_replace('<HOSTNAME>', $host['hostname'], $subject);
+				$subject = str_replace('<DESCRIPTION>', $host['description'], $subject);
+				$subject = str_replace('<DOWN/UP>', __('DOWN', 'thold'), $subject);
+				$subject = str_replace('<DOWNTIME>', $downtimemsg, $subject);
+				$subject = str_replace('<NOTES>', $host['notes'], $subject);
+				$subject = strip_tags($subject);
 
-			$subject = read_config_option('thold_down_subject');
-			if ($subject == '') {
-				$subject = __('Devices Error: <DESCRIPTION> (<HOSTNAME>) is DOWN', 'thold');
-			}
+				$msg = read_config_option('thold_down_text');
+				if ($msg == '') {
+					$msg = __('System Error : <DESCRIPTION> (<HOSTNAME>) is <DOWN/UP><br>Reason: <MESSAGE><br><br>Average system response : <AVG_TIME> ms<br>System availability: <AVAILABILITY><br>Total Checks Since Clear: <TOT_POLL><br>Total Failed Checks: <FAIL_POLL><br>Last Date Checked DOWN : <LAST_FAIL><br>Devices Previously UP for: <DOWNTIME><br>NOTE: <NOTES>', 'thold');
+				}
 
-			$subject = str_replace('<HOSTNAME>', $host['hostname'], $subject);
-			$subject = str_replace('<DESCRIPTION>', $host['description'], $subject);
-			$subject = str_replace('<DOWN/UP>', __('DOWN', 'thold'), $subject);
-			$subject = str_replace('<DOWNTIME>', $downtimemsg, $subject);
-			$subject = str_replace('<NOTES>', $host['notes'], $subject);
-			$subject = strip_tags($subject);
+				$msg = str_replace('<SUBJECT>', $subject, $msg);
+				$msg = str_replace('<HOSTNAME>', $host['hostname'], $msg);
+				$msg = str_replace('<HOST_ID>', $host['id'], $msg);
+				$msg = str_replace('<DESCRIPTION>', $host['description'], $msg);
+				$msg = str_replace('<UPTIME>', '', $msg);
+				$msg = str_replace('<DOWNTIME>', $downtimemsg, $msg);
+				$msg = str_replace('<MESSAGE>', $host['status_last_error'], $msg);
+				$msg = str_replace('<DOWN/UP>', __('DOWN', 'thold'), $msg);
+				$msg = str_replace('<SNMP_HOSTNAME>', '', $msg);
+				$msg = str_replace('<SNMP_LOCATION>', '', $msg);
+				$msg = str_replace('<SNMP_CONTACT>', '', $msg);
+				$msg = str_replace('<SNMP_SYSTEM>', '', $msg);
+				$msg = str_replace('<LAST_FAIL>', $host['status_fail_date'], $msg);
+				$msg = str_replace('<AVAILABILITY>', round(($host['availability']), 2) . ' %', $msg);
+				$msg = str_replace('<CUR_TIME>', round(($host['cur_time']), 2), $msg);
+				$msg = str_replace('<TOT_POLL>', $host['total_polls'], $msg);
+				$msg = str_replace('<FAIL_POLL>', $host['failed_polls'], $msg);
+				$msg = str_replace('<AVG_TIME>', round(($host['avg_time']), 2), $msg);
+				$msg = str_replace('<NOTES>', $host['notes'], $msg);
+				$msg = str_replace('<TIME>', time(), $msg);
+				$msg = str_replace('<DATE>', date(CACTI_DATE_TIME_FORMAT), $msg);
+				$msg = str_replace('<DATE_RFC822>', date(DATE_RFC822), $msg);
+				$msg = str_replace("\n", '<br>', $msg);
 
-			$msg = read_config_option('thold_down_text');
-			if ($msg == '') {
-				$msg = __('System Error : <DESCRIPTION> (<HOSTNAME>) is <DOWN/UP><br>Reason: <MESSAGE><br><br>Average system response : <AVG_TIME> ms<br>System availability: <AVAILABILITY><br>Total Checks Since Clear: <TOT_POLL><br>Total Failed Checks: <FAIL_POLL><br>Last Date Checked DOWN : <LAST_FAIL><br>Devices Previously UP for: <DOWNTIME><br>NOTE: <NOTES>', 'thold');
-			}
+				switch ($host['thold_send_email']) {
+					case '0': // Disabled
+						$alert_email = '';
+						break;
+					case '1': // Global List
+						break;
+					case '2': // Devices List Only
+						$alert_email = get_thold_notification_emails($host['thold_host_email']);
+						break;
+					case '3': // Global and Devices List
+						$alert_email = $alert_email . ',' . get_thold_notification_emails($host['thold_host_email']);
+						break;
+				}
 
-			$msg = str_replace('<SUBJECT>', $subject, $msg);
-			$msg = str_replace('<HOSTNAME>', $host['hostname'], $msg);
-			$msg = str_replace('<HOST_ID>', $host['id'], $msg);
-			$msg = str_replace('<DESCRIPTION>', $host['description'], $msg);
-			$msg = str_replace('<UPTIME>', '', $msg);
-			$msg = str_replace('<DOWNTIME>', $downtimemsg, $msg);
-			$msg = str_replace('<MESSAGE>', $host['status_last_error'], $msg);
-			$msg = str_replace('<DOWN/UP>', __('DOWN', 'thold'), $msg);
-			$msg = str_replace('<SNMP_HOSTNAME>', '', $msg);
-			$msg = str_replace('<SNMP_LOCATION>', '', $msg);
-			$msg = str_replace('<SNMP_CONTACT>', '', $msg);
-			$msg = str_replace('<SNMP_SYSTEM>', '', $msg);
-			$msg = str_replace('<LAST_FAIL>', $host['status_fail_date'], $msg);
-			$msg = str_replace('<AVAILABILITY>', round(($host['availability']), 2) . ' %', $msg);
-			$msg = str_replace('<CUR_TIME>', round(($host['cur_time']), 2), $msg);
-			$msg = str_replace('<TOT_POLL>', $host['total_polls'], $msg);
-			$msg = str_replace('<FAIL_POLL>', $host['failed_polls'], $msg);
-			$msg = str_replace('<AVG_TIME>', round(($host['avg_time']), 2), $msg);
-			$msg = str_replace('<NOTES>', $host['notes'], $msg);
-			$msg = str_replace('<TIME>', time(), $msg);
-			$msg = str_replace('<DATE>', date(CACTI_DATE_TIME_FORMAT), $msg);
-			$msg = str_replace('<DATE_RFC822>', date(DATE_RFC822), $msg);
-			$msg = str_replace("\n", '<br>', $msg);
+				api_plugin_hook_function(
+					'thold_device_down',
+					array(
+						'device'  => $host,
+						'subject' => $subject,
+						'message' => $msg,
+						'email' => $alert_email
+					)
+				);
 
-			switch ($host['thold_send_email']) {
-				case '0': // Disabled
-					$alert_email = '';
-					break;
-				case '1': // Global List
-					break;
-				case '2': // Devices List Only
-					$alert_email = get_thold_notification_emails($host['thold_host_email']);
-					break;
-				case '3': // Global and Devices List
-					$alert_email = $alert_email . ',' . get_thold_notification_emails($host['thold_host_email']);
-					break;
-			}
+				cacti_log('WARNING: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] is down!', true, 'THOLD');
 
-			api_plugin_hook_function(
-				'thold_device_down',
-				array(
-					'device'  => $host,
-					'subject' => $subject,
-					'message' => $msg,
-					'email' => $alert_email
-				)
-			);
+				if ($alert_email == '' && $host['thold_send_email'] > 0) {
+					cacti_log('WARNING: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] can not send a Device down email for \'' . $host['description'] . '\' since the \'Alert Email\' setting is not set for Device!', true, 'THOLD');
+				} elseif ($host['thold_send_email'] == '0') {
+					cacti_log('NOTE: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] did not send a Device down email for \'' . $host['description'] . '\', disabled per Device setting!', true, 'THOLD');
+				} elseif ($alert_email != '') {
+					thold_mail($alert_email, '', $subject, $msg, '');
+				}
 
-			cacti_log('WARNING: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] is down!', true, 'THOLD');
+				$command = read_config_option('thold_device_command');
 
-			if ($alert_email == '' && $host['thold_send_email'] > 0) {
-				cacti_log('WARNING: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] can not send a Device down email for \'' . $host['description'] . '\' since the \'Alert Email\' setting is not set for Device!', true, 'THOLD');
-			} elseif ($host['thold_send_email'] == '0') {
-				cacti_log('NOTE: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] did not send a Device down email for \'' . $host['description'] . '\', disabled per Device setting!', true, 'THOLD');
-			} elseif ($alert_email != '') {
-				thold_mail($alert_email, '', $subject, $msg, '');
-			}
+				if ($command != '') {
+					putenv('THOLD_SUBJECT='      . $subject);
+					putenv('THOLD_HOSTNAME='      . $host['hostname']);
+					putenv('THOLD_HOST_ID='       . $host['id']);
+					putenv('THOLD_DESCRIPTION='   . $host['description']);
+					putenv('THOLD_TIME='          . time());
+					putenv('THOLD_DATE='          . date(CACTI_DATE_TIME_FORMAT));
+					putenv('THOLD_DATE_RFC822='   . date(DATE_RFC822));
 
-			$command = read_config_option('thold_device_command');
+					putenv('THOLD_UPTIME=');
+					putenv('THOLD_DOWNTIME='      . $downtimemsg);
+					putenv('THOLD_MESSAGE='       . $host['status_last_error']);
+					putenv('THOLD_DOWNUP='        . 'DOWN');
 
-			if ($command != '') {
-				putenv('THOLD_SUBJECT='      . $subject);
-				putenv('THOLD_HOSTNAME='      . $host['hostname']);
-				putenv('THOLD_HOST_ID='       . $host['id']);
-				putenv('THOLD_DESCRIPTION='   . $host['description']);
-				putenv('THOLD_TIME='          . time());
-				putenv('THOLD_DATE='          . date(CACTI_DATE_TIME_FORMAT));
-				putenv('THOLD_DATE_RFC822='   . date(DATE_RFC822));
+					putenv('THOLD_SNMP_HOSTNAME=' . $host['snmp_sysName']);
+					putenv('THOLD_SNMP_LOCATION=' . $host['snmp_sysLocation']);
+					putenv('THOLD_SNMP_CONTACT='  . $host['snmp_sysContact']);
+					putenv('THOLD_SNMP_SYSTEM=');
+					putenv('THOLD_LAST_FAIL='     . $host['status_fail_date']);
+					putenv('THOLD_AVAILABILITY='  . $host['availability']);
+					putenv('THOLD_TOT_POLL='      . $host['total_polls']);
+					putenv('THOLD_FAIL_POLL='     . $host['failed_polls']);
+					putenv('THOLD_CUR_TIME='      . $host['cur_time']);
+					putenv('THOLD_AVG_TIME='      . $host['avg_time']);
+					putenv('THOLD_NOTES='         . $host['notes']);
 
-				putenv('THOLD_UPTIME=');
-				putenv('THOLD_DOWNTIME='      . $downtimemsg);
-				putenv('THOLD_MESSAGE='       . $host['status_last_error']);
-				putenv('THOLD_DOWNUP='        . 'DOWN');
+					if (file_exists($command) && is_executable($command)) {
+						$output = array();
+						$return = 0;
 
-				putenv('THOLD_SNMP_HOSTNAME=' . $host['snmp_sysName']);
-				putenv('THOLD_SNMP_LOCATION=' . $host['snmp_sysLocation']);
-				putenv('THOLD_SNMP_CONTACT='  . $host['snmp_sysContact']);
-				putenv('THOLD_SNMP_SYSTEM=');
-				putenv('THOLD_LAST_FAIL='     . $host['status_fail_date']);
-				putenv('THOLD_AVAILABILITY='  . $host['availability']);
-				putenv('THOLD_TOT_POLL='      . $host['total_polls']);
-				putenv('THOLD_FAIL_POLL='     . $host['failed_polls']);
-				putenv('THOLD_CUR_TIME='      . $host['cur_time']);
-				putenv('THOLD_AVG_TIME='      . $host['avg_time']);
-				putenv('THOLD_NOTES='         . $host['notes']);
+						exec($command, $output, $return);
 
-				if (file_exists($command) && is_executable($command)) {
-					$output = array();
-					$return = 0;
-
-					exec($command, $output, $return);
-
-					cacti_log('Device Down Command for Device[' . $host['id'] . '] Command[' . $command . '] ExitStatus[' . $return . '] Output[' . implode(' ', $output) . ']', false, 'THOLD');
-				} else {
-					cacti_log('WARNING: Device Down Command for Device[' . $host['id'] . '] Command[' . $command . '] Is either Not found or Not executable!', false, 'THOLD');
+						cacti_log('Device Down Command for Device[' . $host['id'] . '] Command[' . $command . '] ExitStatus[' . $return . '] Output[' . implode(' ', $output) . ']', false, 'THOLD');
+					} else {
+						cacti_log('WARNING: Device Down Command for Device[' . $host['id'] . '] Command[' . $command . '] Is either Not found or Not executable!', false, 'THOLD');
+					}
 				}
 			}
 		}
@@ -866,7 +864,7 @@ function thold_update_host_status() {
 			WHERE poller_id = ?',
 			array($config['poller_id']));
 
-		$hosts = db_fetch_assoc_prepared('SELECT id, status
+		$hosts = db_fetch_assoc_prepared('SELECT id, status, hostname
 			FROM host
 			WHERE disabled = ""
 			AND poller_id = ?
@@ -878,7 +876,7 @@ function thold_update_host_status() {
 	} else {
 		db_execute('TRUNCATE plugin_thold_host_failed');
 
-		$hosts = db_fetch_assoc_prepared('SELECT id, status
+		$hosts = db_fetch_assoc_prepared('SELECT id, status, hostname
 			FROM host
 			WHERE disabled = ""
 			AND ((status != ? AND status != ?)
@@ -894,8 +892,9 @@ function thold_update_host_status() {
 		foreach ($hosts as $host) {
 			//hosts in recovery status record only if they was in failed status
 			if (($host['status'] != HOST_RECOVERING) OR ($host['status'] == HOST_RECOVERING AND (array_search($host['id'], array_column($failed, 'host_id')) !== false))) {
+
 				if (api_plugin_is_enabled('maint') && plugin_maint_check_cacti_host($host['id'])) {
-					continue;
+					cacti_log('WARNING: Device[' . $host['id'] . '] Hostname[' . $host['hostname'] . '] is RECOVERING. Only logging because maint device', true, 'THOLD');
 				}
 
 				$failed_ids .= ($failed_ids != '' ? '), (':'(') . $host['id'];
